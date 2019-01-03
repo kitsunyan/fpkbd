@@ -1,0 +1,6 @@
+evdev:name:ThinkPad Extra Buttons:dmi:bvn*:bvr*:bd*:svnLENOVO*:pn*
+ KEYBOARD_KEY_1a=sleep
+ KEYBOARD_KEY_1d=home
+ KEYBOARD_KEY_1e=end
+ KEYBOARD_KEY_1f=insert
+ KEYBOARD_KEY_2e=f20
