@@ -110,7 +110,6 @@ static int fpkbd_video_hotkey_pre(struct kprobe * p, struct pt_regs * regs) {
 }
 
 static int atbuf_thread_callback(void * data) {
-	unsigned long flags;
 	u8 codes[ARRAY_SIZE(atbuf)];
 	int count;
 	int i, j;
@@ -147,9 +146,13 @@ static int atbuf_thread_callback(void * data) {
 	return 0;
 }
 
+static void * atkbd_fixup_ptr_get(void) {
+	return (void *) kallsyms_lookup_name("atkbd:atkbd_platform_scancode_fixup");
+}
+
 static int __init fpkbd_init(void) {
 	int code;
-	atkbd_fixup_ptr = (void *) kallsyms_lookup_name("atkbd:atkbd_platform_scancode_fixup");
+	atkbd_fixup_ptr = atkbd_fixup_ptr_get();
 	if (atkbd_fixup_ptr == NULL) {
 		return -EMEDIUMTYPE;
 	}
@@ -174,7 +177,9 @@ static int __init fpkbd_init(void) {
 }
 
 static void __exit fpkbd_exit(void) {
-	*atkbd_fixup_ptr = atkbd_fixup_old;
+	if (atkbd_fixup_ptr == atkbd_fixup_ptr_get()) {
+		*atkbd_fixup_ptr = atkbd_fixup_old;
+	}
 	unregister_kprobe(&video_hotkey);
 	kthread_stop(atbuf_thread);
 }
