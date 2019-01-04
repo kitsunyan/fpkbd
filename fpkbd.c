@@ -22,11 +22,13 @@ MODULE_SOFTDEP("pre: thinkpad_acpi");
 #define ATSCAN_END 0xcf
 #define ATSCAN_INSERT 0xd2
 
-static struct {
+struct atkbd_transform {
 	unsigned int from_atscan;
 	unsigned int to_key_normal;
 	unsigned int to_key_fn;
-} atkbd_transform[6] = {
+};
+
+static struct atkbd_transform atkbd_transform_list[6] = {
 	{ ATSCAN_MUTE, KEY_MUTE, KEY_F20 }, /* Fn + F1 */
 	{ ATSCAN_VOLUMEDOWN, KEY_VOLUMEDOWN, KEY_COFFEE }, /* Fn + F2 */
 	{ ATSCAN_VOLUMEUP, KEY_VOLUMEUP, KEY_BATTERY }, /* Fn + F3 */
@@ -46,29 +48,26 @@ static wait_queue_head_t atbuf_wait;
 static struct task_struct * atbuf_thread;
 
 static int atkbd_emul_next;
+static struct atkbd_transform * atkbd_transform_map[256];
 
 static int fpkbd_atkbd_fixup(void * atkbd, unsigned int code) {
-	int i;
 	if (atkbd_fixup_old != NULL) {
 		code = atkbd_fixup_old(atkbd, code);
 	}
 	if (atkbd_emul_next) {
 		atkbd_emul_next = 0;
-		for (i = 0; i < ARRAY_SIZE(atkbd_transform); i++) {
-			if ((code | 0x80) == atkbd_transform[i].from_atscan) {
-				if (!(code & 0x80)) {
-					if ((atbuf_end >= atbuf_start &&
-						atbuf_end - atbuf_start + 1 < ARRAY_SIZE(atbuf)) ||
-						(atbuf_end < atbuf_start &&
-						atbuf_start + atbuf_end + 1 < ARRAY_SIZE(atbuf))) {
-						atbuf[atbuf_end] = code | 0x80;
-						atbuf_end = atbuf_end + 1 == ARRAY_SIZE(atbuf) ? 0 : atbuf_end + 1;
-					}
-					wake_up_interruptible(&atbuf_wait);
+		if (atkbd_transform_map[0xff & (code | 0x80)] != NULL) {
+			if (!(code & 0x80)) {
+				if ((atbuf_end >= atbuf_start &&
+					atbuf_end - atbuf_start + 1 < ARRAY_SIZE(atbuf)) ||
+					(atbuf_end < atbuf_start &&
+					atbuf_start + atbuf_end + 1 < ARRAY_SIZE(atbuf))) {
+					atbuf[atbuf_end] = code | 0x80;
+					atbuf_end = atbuf_end + 1 == ARRAY_SIZE(atbuf) ? 0 : atbuf_end + 1;
 				}
-				code = ATSCAN_NULL;
-				break;
+				wake_up_interruptible(&atbuf_wait);
 			}
+			code = ATSCAN_NULL;
 		}
 	} else if (code == 0xe0) {
 		atkbd_emul_next = 1;
@@ -111,9 +110,9 @@ static int fpkbd_video_hotkey_pre(struct kprobe * p, struct pt_regs * regs) {
 
 static int atbuf_thread_callback(void * data) {
 	u8 codes[ARRAY_SIZE(atbuf)];
-	int count;
-	int i, j;
+	int i, count;
 	u8 ec_value;
+	struct atkbd_transform * transform;
 	int fn_pressed;
 	int key;
 	while (!kthread_should_stop()) {
@@ -129,15 +128,10 @@ static int atbuf_thread_callback(void * data) {
 					fn_pressed = !!(ec_value & EC_ADDR_FN_MASK);
 				}
 				for (i = 0; i < count; i++) {
-					for (j = 0; j < ARRAY_SIZE(atkbd_transform); j++) {
-						if (atkbd_transform[j].from_atscan == codes[i]) {
-							key = fn_pressed ? atkbd_transform[j].to_key_fn
-								: atkbd_transform[j].to_key_normal;
-							if (key != KEY_RESERVED) {
-								fpkbd_tpacpi_emulate_hotkey(key);
-							}
-							break;
-						}
+					transform = atkbd_transform_map[codes[i]];
+					key = fn_pressed ? transform->to_key_fn : transform->to_key_normal;
+					if (key != KEY_RESERVED) {
+						fpkbd_tpacpi_emulate_hotkey(key);
 					}
 				}
 			}
@@ -151,7 +145,8 @@ static void * atkbd_fixup_ptr_get(void) {
 }
 
 static int __init fpkbd_init(void) {
-	int code;
+	int i;
+	int error;
 	atkbd_fixup_ptr = atkbd_fixup_ptr_get();
 	if (atkbd_fixup_ptr == NULL) {
 		printk(KERN_ERR "Can not get atkbd\n");
@@ -165,16 +160,20 @@ static int __init fpkbd_init(void) {
 		printk(KERN_ERR "Can not get acpi-video\n");
 		return -EMEDIUMTYPE;
 	}
-	code = register_kprobe(&video_hotkey);
-	if (code != 0) {
+	error = register_kprobe(&video_hotkey);
+	if (error != 0) {
 		printk(KERN_ERR "Can not register kprobe\n");
-		return code;
+		return error;
 	}
 	atbuf_thread = kthread_create(atbuf_thread_callback, NULL, "fpkbd-atkbd");
 	if (IS_ERR(atbuf_thread)) {
 		printk(KERN_ERR "Can not create kthread\n");
 		unregister_kprobe(&video_hotkey);
 		return PTR_ERR(atbuf_thread);
+	}
+	memset(atkbd_transform_map, 0, sizeof(atkbd_transform_map));
+	for (i = 0; i < ARRAY_SIZE(atkbd_transform_list); i++) {
+		atkbd_transform_map[atkbd_transform_list[i].from_atscan] = &atkbd_transform_list[i];
 	}
 	atkbd_fixup_old = *atkbd_fixup_ptr;
 	*atkbd_fixup_ptr = fpkbd_atkbd_fixup;
