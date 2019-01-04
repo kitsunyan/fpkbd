@@ -154,6 +154,7 @@ static int __init fpkbd_init(void) {
 	int code;
 	atkbd_fixup_ptr = atkbd_fixup_ptr_get();
 	if (atkbd_fixup_ptr == NULL) {
+		printk(KERN_ERR "Can not get atkbd\n");
 		return -EMEDIUMTYPE;
 	}
 	video_hotkey.pre_handler = fpkbd_video_hotkey_pre;
@@ -161,17 +162,24 @@ static int __init fpkbd_init(void) {
 	video_hotkey.fault_handler = NULL;
 	video_hotkey.addr = (kprobe_opcode_t *) kallsyms_lookup_name("acpi_video_device_notify");
 	if (video_hotkey.addr == NULL) {
+		printk(KERN_ERR "Can not get acpi-video\n");
 		return -EMEDIUMTYPE;
 	}
 	code = register_kprobe(&video_hotkey);
 	if (code != 0) {
+		printk(KERN_ERR "Can not register kprobe\n");
 		return code;
+	}
+	atbuf_thread = kthread_create(atbuf_thread_callback, NULL, "fpkbd-atkbd");
+	if (IS_ERR(atbuf_thread)) {
+		printk(KERN_ERR "Can not create kthread\n");
+		unregister_kprobe(&video_hotkey);
+		return PTR_ERR(atbuf_thread);
 	}
 	atkbd_fixup_old = *atkbd_fixup_ptr;
 	*atkbd_fixup_ptr = fpkbd_atkbd_fixup;
 	atkbd_emul_next = 0;
 	init_waitqueue_head(&atbuf_wait);
-	atbuf_thread = kthread_create(atbuf_thread_callback, NULL, "fpkbd-atkbd");
 	wake_up_process(atbuf_thread);
 	return 0;
 }
