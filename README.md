@@ -57,8 +57,5 @@ The rest keys work as expected.
 
 ## Building and Installing
 
-You should install `70-fpkbd.hwdb` into your `hwdb.d` directory (`/etc/udev/hwdb.d`) and run
-`udevadm hwdb --update` and `udevadm trigger --sysname-match="event*"`.
-
 Run `make` to build the kernel module and then run `insmod fpkbd.ko` to install the module.
 You can also use DKMS and provided `dkms.conf`.
