@@ -59,3 +59,11 @@ The rest keys work as expected.
 
 Run `make` to build the kernel module and then run `insmod fpkbd.ko` to install the module.
 You can also use DKMS and provided `dkms.conf`.
+
+Fn + F4 is handled by thinkpad_acpi module. You can remap the key placing the following udev hwdb
+rule into `/etc/udev/hwdb.d/90-thinkpad-keyboard.hwdb`:
+
+```
+evdev:name:ThinkPad Extra Buttons:dmi:bvn*:bvr*:bd*:svnLENOVO*:pn*
+ KEYBOARD_KEY_1a=sleep
+```

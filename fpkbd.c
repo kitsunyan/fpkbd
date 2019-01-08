@@ -13,7 +13,6 @@ MODULE_DESCRIPTION("ThinkPad T25 keyboard driver");
 MODULE_LICENSE("GPL");
 
 MODULE_SOFTDEP("pre: atkbd");
-MODULE_SOFTDEP("pre: thinkpad_acpi");
 
 #define EC_ADDR_FN 0x46
 #define EC_ADDR_FN_MASK 0x01
@@ -37,7 +36,6 @@ enum fpkbd_scan {
 	FPKBD_SCAN_F20,
 	FPKBD_SCAN_COFFEE,
 	FPKBD_SCAN_BATTERY,
-	FPKBD_SCAN_SLEEP,
 	FPKBD_SCAN_F21,
 	FPKBD_SCAN_CAMERA,
 	FPKBD_SCAN_INSERT,
@@ -55,7 +53,6 @@ static u16 fpkbd_keycode_map[FPKBD_SCAN_MAX] = {
 	KEY_F20,
 	KEY_COFFEE,
 	KEY_BATTERY,
-	KEY_SLEEP,
 	KEY_F21,
 	KEY_CAMERA,
 	KEY_INSERT,
@@ -83,7 +80,6 @@ static struct atkbd_transform atkbd_transform_list[6] = {
 static int (** atkbd_fixup_ptr)(void *, unsigned int);
 static int (* atkbd_fixup_old)(void *, unsigned int);
 static struct kprobe acpi_video_kprobe;
-static struct kprobe tpacpi_key_kprobe;
 
 static u8 atbuf[8];
 static int atbuf_start = 0;
@@ -153,18 +149,6 @@ static int fpkbd_acpi_video_pre(struct kprobe * p, struct pt_regs * regs) {
 	}
 }
 
-static int fpkbd_tpacpi_key_pre(struct kprobe * p, struct pt_regs * regs) {
-	u16 ** keycode_map = (void *) kallsyms_lookup_name("thinkpad_acpi:hotkey_keycode_map");
-	if (keycode_map != NULL && *keycode_map != NULL &&
-		(*keycode_map)[regs->di] == KEY_F20) {
-		fpkbd_input_dev_send_code(FPKBD_SCAN_SLEEP);
-		regs->ip = (u64) fpkbd_kprobe_nothing;
-		return 1;
-	} else {
-		return 0;
-	}
-}
-
 static int atbuf_thread_callback(void * data) {
 	u8 codes[ARRAY_SIZE(atbuf)];
 	int i, count;
@@ -224,20 +208,6 @@ static int __init fpkbd_init(void) {
 		pr_err("Can not register kprobe\n");
 		goto init_fail;
 	}
-	tpacpi_key_kprobe.pre_handler = fpkbd_tpacpi_key_pre;
-	tpacpi_key_kprobe.post_handler = NULL;
-	tpacpi_key_kprobe.fault_handler = NULL;
-	tpacpi_key_kprobe.addr = (kprobe_opcode_t *) kallsyms_lookup_name("thinkpad_acpi:tpacpi_input_send_key");
-	if (tpacpi_key_kprobe.addr == NULL) {
-		pr_err("Can not get thinkpad-acpi\n");
-		error = -EMEDIUMTYPE;
-		goto tpacpi_key_kprobe_create_fail;
-	}
-	error = register_kprobe(&tpacpi_key_kprobe);
-	if (error != 0) {
-		pr_err("Can not register kprobe\n");
-		goto tpacpi_key_kprobe_create_fail;
-	}
 	atbuf_thread = kthread_create(atbuf_thread_callback, NULL, KBUILD_MODNAME "-atkbd");
 	if (IS_ERR(atbuf_thread)) {
 		pr_err("Can not create kthread\n");
@@ -285,8 +255,6 @@ input_register_device_fail:
 input_allocate_device_fail:
 	kthread_stop(atbuf_thread);
 kthread_create_fail:
-	unregister_kprobe(&tpacpi_key_kprobe);
-tpacpi_key_kprobe_create_fail:
 	unregister_kprobe(&acpi_video_kprobe);
 init_fail:
 	return error;
@@ -297,7 +265,6 @@ static void __exit fpkbd_exit(void) {
 		*atkbd_fixup_ptr = atkbd_fixup_old;
 	}
 	unregister_kprobe(&acpi_video_kprobe);
-	unregister_kprobe(&tpacpi_key_kprobe);
 	kthread_stop(atbuf_thread);
 	input_unregister_device(fpkbd_input_dev);
 }
